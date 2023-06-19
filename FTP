@@ -1,0 +1,158 @@
+#SERVER
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#define MAX_BUFFER_SIZE 1024
+#define SERVER_PORT 12345
+
+void handleClient(int clientSocket) {
+    char buffer[MAX_BUFFER_SIZE];
+
+    // Receive the file name from the client
+    memset(buffer, 0, MAX_BUFFER_SIZE);
+    recv(clientSocket, buffer, MAX_BUFFER_SIZE, 0);
+    printf("File requested: %s\n", buffer);
+
+    // Open the file
+    FILE* file = fopen(buffer, "r");
+    if (file == NULL) {
+        printf("Error opening file.\n");
+        return;
+    }
+
+    // Read and send the file contents
+    int bytesRead;
+    while ((bytesRead = fread(buffer, 1, MAX_BUFFER_SIZE, file)) > 0) {
+        send(clientSocket, buffer, bytesRead, 0);
+    }
+
+    // Close the file and client socket
+    fclose(file);
+    close(clientSocket);
+}
+
+int main() {
+    int serverSocket, clientSocket;
+    struct sockaddr_in serverAddress, clientAddress;
+    socklen_t clientAddressLength;
+
+    // Create the server socket
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0) {
+        printf("Error creating socket.\n");
+        return 1;
+    }
+
+    // Configure the server address
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(SERVER_PORT);
+    serverAddress.sin_addr.s_addr = INADDR_ANY;
+
+    // Bind the server socket to the specified address and port
+    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
+        printf("Error binding socket.\n");
+        return 1;
+    }
+
+    // Listen for incoming connections
+    if (listen(serverSocket, 1) < 0) {
+        printf("Error listening for connections.\n");
+        return 1;
+    }
+
+    printf("Server started. Listening on port %d\n", SERVER_PORT);
+
+    // Accept incoming connection
+    clientAddressLength = sizeof(clientAddress);
+    clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddress, &clientAddressLength);
+    if (clientSocket < 0) {
+        printf("Error accepting connection.\n");
+        return 1;
+    }
+
+    printf("Client connected. IP: %s, Port: %d\n",
+           inet_ntoa(clientAddress.sin_addr), ntohs(clientAddress.sin_port));
+
+    // Handle client request
+    handleClient(clientSocket);
+
+    // Close the server socket
+    close(serverSocket);
+
+    return 0;
+}
+#CLIENT
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#define MAX_BUFFER_SIZE 1024
+#define SERVER_IP "127.0.0.1"
+#define SERVER_PORT 12345
+
+void receiveFile(int serverSocket, const char* filename) {
+    char buffer[MAX_BUFFER_SIZE];
+
+    // Open the file for writing
+    FILE* file = fopen(filename, "w");
+    if (file == NULL) {
+        printf("Error creating file.\n");
+        return;
+    }
+
+    // Receive and write file contents
+    int bytesRead;
+    while ((bytesRead = recv(serverSocket, buffer, MAX_BUFFER_SIZE, 0)) > 0) {
+        fwrite(buffer, 1, bytesRead, file);
+    }
+
+    // Close the file
+    fclose(file);
+}
+
+int main() {
+    int serverSocket;
+    struct sockaddr_in serverAddress;
+
+    // Create the client socket
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0) {
+        printf("Error creating socket.\n");
+        return 1;
+    }
+
+    // Configure the server address
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(SERVER_PORT);
+    if (inet_pton(AF_INET, SERVER_IP, &(serverAddress.sin_addr)) <= 0) {
+        printf("Invalid server IP address.\n");
+        return 1;
+    }
+
+    // Connect to the server
+    if (connect(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
+        printf("Error connecting to server.\n");
+        return 1;
+    }
+
+    printf("Connected to server. Enter file name: ");
+    char filename[MAX_BUFFER_SIZE];
+    fgets(filename, MAX_BUFFER_SIZE, stdin);
+    filename[strcspn(filename, "\n")] = 0;  // Remove trailing newline
+
+    // Send the file name to the server
+    send(serverSocket, filename, strlen(filename), 0);
+
+    // Receive the file from the server
+    receiveFile(serverSocket, filename);
+
+    // Close the client socket
+    close(serverSocket);
+
+    return 0;
+}
